@@ -1,0 +1,79 @@
+name: Build and publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, to pick up upstream PHP patch releases and Debian security fixes.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{github.ref}}
+  cancel-in-progress: true
+
+env:
+  IMAGE: docker.io/nasapds/drupal
+  PHP_VERSION: '8.3'
+
+jobs:
+  build:
+    name: Build, test, push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{env.IMAGE}}
+          flavor: latest=false
+          tags: |
+            type=raw,value=php${{env.PHP_VERSION}}-apache-trixie
+            type=raw,value=php${{env.PHP_VERSION}}-apache-trixie-{{date 'YYYYMMDD'}}
+
+      - name: Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: PHP_VERSION=${{env.PHP_VERSION}}
+          pull: true
+          no-cache: ${{github.event_name == 'schedule'}}
+          load: true
+          tags: nasapds/drupal:smoke
+          labels: ${{steps.meta.outputs.labels}}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: tests/smoke.sh nasapds/drupal:smoke
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{secrets.DOCKERHUB_USERNAME}}
+          password: ${{secrets.DOCKERHUB_TOKEN}}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: PHP_VERSION=${{env.PHP_VERSION}}
+          push: true
+          tags: ${{steps.meta.outputs.tags}}
+          labels: ${{steps.meta.outputs.labels}}
+          cache-from: type=gha
