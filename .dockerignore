@@ -1,0 +1,11 @@
+# Repository metadata and CI
+/.git/
+/.github/
+/.gitignore
+/.dockerignore
+
+# Not needed at build time
+/tests/
+/README.md
+/LICENSE.md
+/NOTICE.txt
